@@ -1,0 +1,12 @@
+version: "2.1"
+
+services:
+  jailbreak:
+    build: .
+    privileged: true
+    labels:
+      io.balena.features.dbus: 1
+      io.balena.features.balena-socket: 1
+    environment:
+      DBUS_SYSTEM_BUS_ADDRESS: "unix:path=/host/run/dbus/system_bus_socket"
+    restart: no
