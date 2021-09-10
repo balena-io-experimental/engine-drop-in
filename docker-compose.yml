@@ -1,7 +1,7 @@
 version: "2.1"
 
 services:
-  jailbreak:
+  engine-drop-in:
     build: .
     privileged: true
     labels:

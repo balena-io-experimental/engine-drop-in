@@ -15,8 +15,12 @@ watchdog_usec="$(dbus-send \
 
 [ "${watchdog_usec}" != "0" ] || { echo "nothing to do" ; exit 0 ; }
 
+# for rpi-zero you may need to set HELPER_IMAGE=arm32v6/alpine or the
+# engine may pull the wrong arch due to https://github.com/balena-os/balena-engine/issues/269
+helper_image="${HELPER_IMAGE:-alpine}"
+
 # mount the host OS /lib path as read-only and copy the balena service file for reference
-docker run --rm -v /lib:/host/lib:ro alpine sh -c 'cat /host/lib/systemd/system/balena.service' > balena.service
+docker run --rm -v /lib:/host/lib:ro "${helper_image}" sh -c 'cat /host/lib/systemd/system/balena.service' > balena.service
 
 # parse the existing ExecStart command as it differs between devices
 # exec_start="$(sed -n 's/^ExecStart=//p' balena.service)"
@@ -31,9 +35,9 @@ WatchdogSec=0
 "
 
 # install drop-in under the host OS /run path so it is cleared on reboot
-docker run --rm -v /run:/host/run:rw alpine sh -c "mkdir -p /host/run/systemd/system/balena.service.d"
-docker run --rm -v /run:/host/run:rw alpine sh -c "echo '${custom_conf}' > /host/run/systemd/system/balena.service.d/custom.conf"
-docker run --rm -v /run:/host/run:rw alpine sh -c "cat /host/run/systemd/system/balena.service.d/custom.conf"
+docker run --rm -v /run:/host/run:rw "${helper_image}" sh -c "mkdir -p /host/run/systemd/system/balena.service.d"
+docker run --rm -v /run:/host/run:rw "${helper_image}" sh -c "echo '${custom_conf}' > /host/run/systemd/system/balena.service.d/custom.conf"
+docker run --rm -v /run:/host/run:rw "${helper_image}" sh -c "cat /host/run/systemd/system/balena.service.d/custom.conf"
 
 # reload the systemd daemon (same as systemctl daemon-reload)
 dbus-send \
