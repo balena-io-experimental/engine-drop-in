@@ -1,20 +1,44 @@
-# engine-drop-in
+# systemd-set-prop
 
-Example app to modify the systemd service of balena engine on disk.
+Adjust properties of systemd units on the host OS at runtime.
 
-This is useful for adding debug flags, adjusting the systemd watchdog, or providing new args to the engine.
+## Environment Variables
 
-After applying the changes for the first time the engine service will be restarted so use with caution!
+To run this project, you will need the following environment variables in your container:
 
-The service is expected to remain in the `Exited` state after performing it's task.
+- `UNIT`: Name of the systemd unit to modify. For example `balena.service`.
+- `PROPERTY`: Property of the systemd unit to modify. For example `WatchdogUSec`.
+- `VALUE`: Value of the systemd property to apply. For example `6m`.
 
-This is for testing and can be repurposed but the current
-iteration is to disable the systemd watchdog for the engine to avoid
-being killed during yocto builds.
+## Service Labels
 
-Previously these customizations would have to be made manually on the
-host OS without any history or reproducability.
+To run this project, you will need the following labels on the `dnat` service:
 
-These changes are also intentionally cleared on reboot, and reapplied
-if this service still exists. The easiest way to recover the system is
-to set an env var `DISABLE_ENGINE_DROPIN` to any value and reboot.
+- `io.balena.features.balena-socket=1`: Bind mounts the balena container engine socket into the container and
+  sets the environment variable `DOCKER_HOST` with the socket location for use by docker clients.
+
+See <https://www.balena.io/docs/reference/supervisor/docker-compose/#labels> for more info on supervisor labels.
+
+## Usage/Examples
+
+After a systemd unit is modified it will be restarted so use with caution!
+
+If the systemd unit already has the desired property, nothing will be done.
+
+Here's an example to increase the balena engine watchdog interval.
+
+```yml
+version: "2.1"
+services:
+  systemd-set-prop:
+    build: .
+    restart: no
+    labels:
+      io.balena.features.balena-socket: 1
+    environment:
+      UNIT: "balena.service"
+      PROPERTY: "WatchdogUSec"
+      VALUE: "600"
+```
+
+This service is expected to remain in the `Exited` state after performing it's task.
