@@ -2,56 +2,62 @@
 
 set -eux
 
-[ -z "${DISABLE_ENGINE_DROPIN:-}" ] || { echo "nothing to do" ; exit 0 ; }
+# use chroot to make most host commands available
+host_cmd() {
+    docker exec "${host_container:-}" chroot /host sh -c "$*"
+}
 
-# check if the current balena service has already had watchdog disabled
-watchdog_usec="$(dbus-send \
+object_path() {
+    echo /org/freedesktop/systemd1/unit/"$(echo "${1}" | sed -e 's/\./_2e/g' -e 's/-/_2d/g' -e 's/@/_40/g')"
+}
+
+cleanup() {
+    [ -n "${host_container:-}" ] && (docker rm --force "${host_container}" || true)
+}
+
+trap "cleanup" EXIT
+
+path="$(object_path "${UNIT}")"
+echo "Using object path ${path} for ${UNIT}..."
+
+echo "Getting property ${PROPERTY}..."
+ret="$(dbus-send \
     --system \
     --print-reply \
     --dest=org.freedesktop.systemd1 \
-    /org/freedesktop/systemd1/unit/balena_2eservice \
+    "${path}" \
     org.freedesktop.DBus.Properties.Get \
-    string:org.freedesktop.systemd1.Service string:WatchdogUSec | tail -n1 | awk '{print $3}')"
+    string:org.freedesktop.systemd1.Service string:"${PROPERTY}"| tail -n1)"
 
-[ "${watchdog_usec}" != "0" ] || { echo "nothing to do" ; exit 0 ; }
+type="$(echo "${ret}" | awk '{print $1":"$2}')"
+val="$(echo "${ret}" | awk '{print $3}')"
 
-# for rpi-zero you may need to set HELPER_IMAGE=arm32v6/alpine or the
-# engine may pull the wrong arch due to https://github.com/balena-os/balena-engine/issues/269
-helper_image="${HELPER_IMAGE:-alpine}"
+echo "${type}:${val}"
 
-# mount the host OS /lib path as read-only and copy the balena service file for reference
-docker run --rm -v /lib:/host/lib:ro "${helper_image}" sh -c 'cat /host/lib/systemd/system/balena.service' > balena.service
+# # exit if the property is already set
+if [ "${val}" = "${VALUE}" ]
+then
+    echo "Nothing to do..."
+    exit 0
+fi
 
-# parse the existing ExecStart command as it differs between devices
-# exec_start="$(sed -n 's/^ExecStart=//p' balena.service)"
-balenad_args="$(sed -n 's|^ExecStart=.*/usr/bin/balenad ||p' balena.service)"
-
-# create custom drop-in to disable healthdog and watchdog
-custom_conf="
-[Service]
-ExecStart=
-ExecStart=/usr/bin/balenad ${balenad_args}
-WatchdogSec=0
-"
-
-# install drop-in under the host OS /run path so it is cleared on reboot
-docker run --rm -v /run:/host/run:rw "${helper_image}" sh -c "mkdir -p /host/run/systemd/system/balena.service.d"
-docker run --rm -v /run:/host/run:rw "${helper_image}" sh -c "echo '${custom_conf}' > /host/run/systemd/system/balena.service.d/custom.conf"
-docker run --rm -v /run:/host/run:rw "${helper_image}" sh -c "cat /host/run/systemd/system/balena.service.d/custom.conf"
-
-# reload the systemd daemon (same as systemctl daemon-reload)
-dbus-send \
+echo "Setting property ${PROPERTY} ${type}:${VALUE}..."
+ret="$(dbus-send \
     --system \
-    --dest=org.freedesktop.systemd1 \
-    --type=method_call \
     --print-reply \
-    /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager.Reload
+    --dest=org.freedesktop.systemd1 \
+    "${path}" \
+    org.freedesktop.DBus.Properties.Set \
+    string:org.freedesktop.systemd1.Service string:"${PROPERTY}" "${type}:${VALUE}")"
 
-# restart the balena service (same as systemctl restart balena.service)
-dbus-send \
-    --system \
-    --dest=org.freedesktop.systemd1 \
-    --type=method_call \
-    --print-reply \
-    /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager.RestartUnit \
-    string:"balena.service" string:"replace"
+# # use our current image as the helper image
+# helper_image="$(docker inspect --format '{{ .Image }}' "$(hostname)")"
+
+# # start the host container detached to eliminate container startup time overhead
+# host_container="$(docker run -it --rm -d --privileged -v /:/host "${helper_image}" /bin/sh)"
+
+# # set property in runtime only so it is cleared on reboot
+# host_cmd systemctl set-property "${UNIT}" "${PROPERTY}=${VALUE}" --runtime
+
+# # restart the target unit
+# host_cmd systemctl restart "${UNIT}"
